@@ -12,6 +12,8 @@ import signal
 
 LOGIN_URL = 'https://mc.shockbyte.com/index.php?r=site/login'
 CONSOLE_URL = 'https://mc.shockbyte.com/index.php?r=server/log'
+VIEW_URL = 'https://mc.shockbyte.com/index.php?r=server/view'
+VIEW_PLAYER_URL = 'https://mc.shockbyte.com/index.php?r=player/view'
 
 class Console(Cmd):
     prompt = "Multicraft > "
@@ -116,16 +118,51 @@ def stream_console(session, server_id, log_seq=0):
 
         sleep(1)
 
+def get_status(session, server_id):
+    token = session.cookies.get('YII_CSRF_TOKEN')
+    payload = {
+        'ajax': 'refresh',
+        'type': 'all',
+        'log_seq': 0,
+        'YII_CSRF_TOKEN': token
+    }
+
+    url = f"{VIEW_URL}&id={server_id}"
+    res = session.post(url, data=payload)
+    details = json.loads(res.content.decode('utf-8'))
+
+    players_tree = html.fromstring(details['players'])
+    player_elements = players_tree.xpath('//div/a/span')
+
+    players = []
+    for player_element in player_elements:
+        player_name = player_element.xpath('text()')[0]
+        player_link = player_element.getparent().xpath('@href')[0]
+        player_id = search('[0-9]+$', player_link)[0]
+        players.append({
+            'name': player_name,
+            'id': player_id
+        })
+
+    return {
+            'players': players,
+            'status': details['status']
+    }
+
 def main_menu(session, server_id):
     def exit_console(sig, frame):
         global should_stream_console
-        should_stream_console = False
+        if should_stream_console:
+            should_stream_console = False
+        else:
+            exit(2)
 
     while True:
-        print("-------Main Menu-------")
+        print("=======Main Menu=======")
         print("1. View Console")
         print("2. Send Console Command")
-        print("3. Exit")
+        print("3. View Status")
+        print("4. Exit")
 
         num = input("Option: ")
 
@@ -142,6 +179,28 @@ def main_menu(session, server_id):
             console = Console(session, server_id)
             console.cmdloop()
         elif num == 3:
+            info = get_status(session, server_id)
+            while True:
+                print('=========Status=========')
+                print(info['status'])
+
+                print('-------Player List-------')
+                i = 1
+                for player in info['players']:
+                    print(f"{i}. {player['name']} ({player['id']})")
+                    i += 1
+                print(f'{i}. Go Back')
+
+                ans = input("Option: ")
+                if ans.isdigit():
+                    ans = int(ans)
+                    if ans == i:
+                        break
+                    elif ans > 0 and ans <= len(info['players']):
+                        player_id = info['players'][ans - 1]['id']
+                        print(f"{VIEW_PLAYER_URL}&id={player_id}")
+                        break
+        elif num == 4:
             exit(0)
         else:
             print(f"Invalid option: '{num}'")
